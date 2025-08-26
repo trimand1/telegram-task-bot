@@ -2,12 +2,16 @@ import os
 import json
 from flask import Flask, request
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.utils.request import Request
 
-TOKEN = os.getenv("BOT_TOKEN")  # Токен из переменной окружения
-APP_URL = os.getenv("APP_URL")   # URL сервиса Render, например https://my-bot.onrender.com
+TOKEN = os.getenv("BOT_TOKEN")      # токен бота
+APP_URL = os.getenv("APP_URL")      # публичный URL Render, например https://telegram-task-bot.onrender.com
 DATA_FILE = "task_lists.json"
 
-bot = Bot(TOKEN)
+# Создаём синхронный Bot
+bot = Bot(token=TOKEN, request=Request())
+
+# Flask приложение
 app = Flask(__name__)
 
 # Загрузка/сохранение списков
@@ -29,45 +33,56 @@ def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
     chat_id = str(update.effective_chat.id) if update.message else None
 
-    # Обработка команд
     if update.message:
         text = update.message.text
+
+        # /newlist Название
         if text.startswith("/newlist"):
-            if len(text.split(" ",1)) < 2:
+            parts = text.split(" ", 1)
+            if len(parts) < 2:
                 bot.send_message(chat_id, "Используй: /newlist Название")
                 return "ok"
-            name = text.split(" ",1)[1]
+            name = parts[1]
             if chat_id not in lists:
                 lists[chat_id] = {}
             lists[chat_id][name] = {"tasks": [], "status": []}
             save_data()
             bot.send_message(chat_id, f"Создан новый список: {name}")
+
+        # /add Текст задачи
         elif text.startswith("/add"):
-            if len(text.split(" ",1)) < 2:
+            parts = text.split(" ", 1)
+            if len(parts) < 2:
                 bot.send_message(chat_id, "Используй: /add текст задачи")
                 return "ok"
-            task = text.split(" ",1)[1]
-            list_name = list(lists[chat_id].keys())[-1]
+            task = parts[1]
+            list_name = list(lists[chat_id].keys())[-1]  # последняя созданная
             lists[chat_id][list_name]["tasks"].append(task)
             lists[chat_id][list_name]["status"].append(False)
             save_data()
             bot.send_message(chat_id, f"Добавлено: {task}")
+
+        # /showlist Название
         elif text.startswith("/showlist"):
-            if len(text.split(" ",1)) < 2:
+            parts = text.split(" ", 1)
+            if len(parts) < 2:
                 bot.send_message(chat_id, "Используй: /showlist Название")
                 return "ok"
-            list_name = text.split(" ",1)[1]
-            if list_name not in lists.get(chat_id, {}):
+            list_name = parts[1]
+            if chat_id not in lists or list_name not in lists[chat_id]:
                 bot.send_message(chat_id, "Такого списка нет")
                 return "ok"
+
             tasks = lists[chat_id][list_name]["tasks"]
             status = lists[chat_id][list_name]["status"]
+
             keyboard = []
             for i, t in enumerate(tasks):
                 text_btn = f"✅ {t}" if status[i] else f"⬜ {t}"
                 keyboard.append([InlineKeyboardButton(text_btn, callback_data=f"{chat_id}|{list_name}|{i}")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             bot.send_message(chat_id, f"Список: {list_name}", reply_markup=reply_markup)
+
     return "ok"
 
 @app.route("/")
@@ -75,6 +90,7 @@ def index():
     return "Bot is running!"
 
 if __name__ == "__main__":
+    # Устанавливаем webhook
+    bot.set_webhook(f"{APP_URL}/{TOKEN}")
     port = int(os.environ.get("PORT", 5000))
-    bot.set_webhook(f"{APP_URL}/{TOKEN}")  # Устанавливаем webhook
     app.run(host="0.0.0.0", port=port)
